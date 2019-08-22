@@ -140,9 +140,8 @@ class PreTrainVocab(object):
             emb_list.append(emb)
         return np.array(emb_list,dtype=np.float32)
 
-def train(argsConfig):
-    args_dict=json.load(open(argsConfig.config_path,'r'))
-    args=dict_to_object(dict(args_dict))
+def train(args,model_name):
+
     if not os.path.exists(PATH+args.output_path):
         os.mkdir(PATH+args.output_path)
 
@@ -223,7 +222,6 @@ def train(argsConfig):
 
     # ### 模型选择 BaseTransformerStruct
     # model_name=args.model_name
-    model_name="BaseLSTM"
     if model_name == 'BaseLSTM':
         model=BaseLstm(args,'BaseLstm')
     elif model_name == 'BaseLstmStruct':
@@ -243,305 +241,64 @@ def train(argsConfig):
     model.build_loss()
     model.build_op()
 
+    if args.restore_model=='':
+        model.train(train_data_loader, test_data_loader,restore_model=None, save_model=PATH + "/output/%s_%s_2kw.ckpt"%(model_name,args.task_name))
+    else:
+        model.train(train_data_loader, test_data_loader,restore_model=PATH+args.restore_model, save_model=PATH + "/output/%s_%s_2kw.ckpt"%(model_name,args.task_name))
+
+def predict(args,model_name,restore_path):
+    intent_dict = pkl.load(open(PATH + "/intent_dict.p", 'rb'))
+    args.id2intent = {v: k for k, v in intent_dict.items()}
+    vocab = WordVocab.load_vocab(PATH + args.vocab_path)
+    poss_vocab = pkl.load(open(PATH + "/poss_vocab.p", 'rb'))
+
+    args.num_layers = 1
+    args.vocab_size = len(vocab)
+    args.class_nums = len(intent_dict)
+    args.poss_num = len(poss_vocab)
+
+    if args.use_pre_train_emb:
+        vocab_emb = pkl.load(open('%s_vocab_emb.p' % args.task_name, 'rb'))
+        args.vocab_emb = vocab_emb
+
+    if model_name == 'BaseLSTM':
+        model = BaseLstm(args, 'BaseLstm')
+    elif model_name == 'BaseLstmStruct':
+        model = BaseLstmStruct(args, 'BaseLstmStruct')
+    elif model_name == 'BaseTransformerStruct':
+        model = BaseTransformerStruct(args, 'BaseTransformerStruct')
+    elif model_name == 'cnn':
+        model = Cnn(args, 'cnn')
+    elif model_name == 'TransformerCNN':
+        model = TransformerCNN(args, 'TransformerCNN')
+    elif model_name == 'LEAM':
+        model = LEAM(args, 'LEAM')
+    args.model_name = model_name
+    model.build_placeholder()
+    model.build_model()
+    config = tf.ConfigProto(allow_soft_placement=True)
+    with tf.Session(config=config) as sess:
+        sess=model.restore(sess,restore_path)
+        pdd=PredictDataDeal(vocab=vocab,seq_len=args.seq_len,poss_vocab=poss_vocab,vocab_char=None)
+        while True:
+            sent=input("输入:")
+            t1,t1_len,poss=pdd.predict(sent)
+            pre_prob,pre_label=model.predict(sess,t1,t1_len,poss)
+            print(args.id2intent[pre_label[0]],np.max(pre_prob,-1))
 
 
-    do_train=True
-    do_predict=False
-    do_predict_txt=False
-    do_predict_other=False
-    do_predict_xlsx=False
-    print(argsConfig.mode)
+def main(argsConfig):
+    model_name='BaseLSTM'
+    args_dict = json.load(open(argsConfig.config_path, 'r'))
+    args = dict_to_object(dict(args_dict))
+
     if argsConfig.mode=='train':
-        do_train=True
-    if argsConfig.mode=='predict':
-        do_predict=True
-    if argsConfig.mode=='predict_txt':
-        do_predict_txt=True
-    if argsConfig.mode=='predict_other':
-        do_predict_other=True
-    if argsConfig.mode=='predict_xlsx':
-        do_predict_xlsx=True
-
-    restore_path=PATH + "/output/%s_%s_2kw.ckpt-15"%(model_name,args.task_name)
-    if do_train:
-        if args.restore_model=='':
-            model.train(train_data_loader, test_data_loader,restore_model=None, save_model=PATH + "/output/%s_%s_2kw.ckpt"%(model_name,args.task_name))
-        else:
-            model.train(train_data_loader, test_data_loader,restore_model=PATH+args.restore_model, save_model=PATH + "/output/%s_%s_2kw.ckpt"%(model_name,args.task_name))
-
-    # intent2name = pkl.load(open('./intent2name.p', 'rb'))
-
-    if do_predict:
-        config = tf.ConfigProto(allow_soft_placement=True)
-        id2label1 = {v: k for k, v in label_vocab1.items()}
-        id2label2 = {v: k for k, v in label_vocab2.items()}
-        id2label3 = {v: k for k, v in label_vocab3.items()}
-        id2label_list=[id2label1,id2label2,id2label3]
-
-        with tf.Session(config=config) as sess:
-            sess=model.restore(sess,restore_path)
-            pdd=PredictDataDeal(vocab=vocab,seq_len=args.seq_len,poss_vocab=poss_vocab,vocab_char=None)
-            # id2label={v:k for k,v in label_vocab.items()}
-            # id2ner={v:k for k,v in ner_vocab.items()}
-            while True:
-                ss=[]
-                sent=input("输入:")
-                t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len=pdd.predict(sent)
-                result=model.predict(sess,t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len)
-                for i,res in enumerate(result):
-                    id2label=id2label_list[i]
-                    # print(res[0][0])
-                    # print(id2label[res[1][0]])
-                    ss.append("_".join([str(res[0][0]),str(id2label[res[1][0]])]))
-                print(ss)
-
-    if do_predict_txt:
-        config = tf.ConfigProto(allow_soft_placement=True)
-        path='/dockerdata/KeyWordDataSet/rg_train_20190701_1000002.test_new_0723'
-        id2label1 = {v: k for k, v in label_vocab1.items()}
-        id2label2 = {v: k for k, v in label_vocab2.items()}
-        id2label3 = {v: k for k, v in label_vocab3.items()}
-        id2label_list=[id2label1,id2label2,id2label3]
-        true_label_list=[]
-        pre_label_list=[]
-        fw2=open('out_analy_label2.txt','w',encoding='utf-8')
-        fw3=open('out_analy_label3.txt','w',encoding='utf-8')
-        with tf.Session(config=config) as sess:
-            sess = model.restore(sess,restore_path)
-            pdd = PredictDataDeal(vocab=vocab, seq_len=args.seq_len, poss_vocab=poss_vocab)
-
-            for line in open(path,'r',encoding='utf-8').readlines():
-                lines=line.replace('\n','').split(":")
-                sent,labels=lines[-2],lines[-1]
-                label_list=labels.split('_')
-                true_label_list.append(label_list)
-                t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len=pdd.predict(sent)
-                result=model.predict(sess,t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len)
-                ss=[]
-                for i, res in enumerate(result):
-                    id2label = id2label_list[i]
-                    # print(res[0][0])
-                    # print(id2label[res[1][0]])
-                    ss.append(id2label[res[1][0]])
-
-                if ss[1]!=label_list[1]:
-                    fw2.write(sent+'\t\t'+str(label_list[1])+'\t\t'+str(ss[1])+'\n')
-                if ss[2]!=label_list[2]:
-                    fw3.write(sent+'\t\t'+str(label_list[2])+'\t\t'+str(ss[2])+'\n')
-                pre_label_list.append(ss)
-
-        true_label1=[e[0] for e in true_label_list]
-        true_label2=[e[1] for e in true_label_list]
-        true_label3=[e[2] for e in true_label_list]
-
-        pre_label1=[e[0] for e in pre_label_list]
-        pre_label2=[e[1] for e in pre_label_list]
-        pre_label3=[e[2] for e in pre_label_list]
-
-        report1=classification_report(true_label1,pre_label1)
-        report2=classification_report(true_label2,pre_label2)
-        report3=classification_report(true_label3,pre_label3)
-
-        print(report1)
-        print(report2)
-        print(report3)
-        labels3=[]
-        for e in true_label3:
-            if e not in labels3:
-                labels3.append(e)
-
-        labels2=[]
-        for e in true_label2:
-            if e not in labels2:
-                labels2.append(e)
-        print(labels3)
-        matrix_2=confusion_matrix(true_label2, pre_label2, labels=labels2, sample_weight=None)
-        matrix_3=confusion_matrix(true_label3, pre_label3, labels=labels3, sample_weight=None)
-
-        fw_3=open('confusion_matrix_label3.txt','w',encoding='utf-8')
-        for i in range(len(matrix_3)):
-            ll=labels3[i]
-            ele=matrix_3[i]
-            fw_3.write(ll+':'+'\t\t')
-            for j,e in enumerate(ele):
-                if int(e)>0:
-                    fw_3.write(labels3[j]+'_'+str(e)+'\t\t')
-            fw_3.write('\n')
-
-        fw_2=open('confusion_matrix_label2.txt','w',encoding='utf-8')
-        for i in range(len(matrix_2)):
-            ll=labels2[i]
-            ele=matrix_2[i]
-            fw_2.write(ll+':'+'\t\t')
-            for j,e in enumerate(ele):
-                if int(e)>0:
-                    fw_2.write(labels2[j]+'_'+str(e)+'\t\t')
-            fw_2.write('\n')
+        train(args,model_name)
 
 
-
-
-
-    if do_predict_xlsx:
-
-        # ic=IntentCls(model_name=restore_path)
-        dd_2={}
-        for ele in open('./test_with_c1_02.txt','r',encoding='utf-8').readlines():
-            eles=ele.replace('\n','').split('\t\t')
-            sent=eles[3]
-            score=eles[2]
-            label=eles[1]
-            if label.__contains__('inter') or label.__contains__('自动续费'):
-                label="None"
-            dd_2[sent]=[label,score]
-
-        dd_3={}
-        for ele in open('./test_03.txt','r',encoding='utf-8').readlines():
-            eles=ele.replace('\n','').split('\t\t')
-            sent=eles[3]
-            score=eles[2]
-            label=eles[1]
-            if label.__contains__('inter') or label.__contains__('自动续费'):
-                label="None"
-            dd_3[sent]=[label,score]
-
-        # dd_2={}
-        # dd_3={}
-        config = tf.ConfigProto(allow_soft_placement=True)
-        path='./cp_4000142_0726.xlsx'
-        id2label1 = {v: k for k, v in label_vocab1.items()}
-        id2label2 = {v: k for k, v in label_vocab2.items()}
-        id2label3 = {v: k for k, v in label_vocab3.items()}
-        id2label_list=[id2label1,id2label2,id2label3]
-        true_label_list=[]
-        pre_label_list=[]
-        fw=open("cp_4000142_0723_out.txt",'w',encoding='utf-8')
-        fw_false=open("cp_4000142_0723_out_false.txt",'w',encoding='utf-8')
-
-        count_dict={}
-        with tf.Session(config=config) as sess:
-            sess = model.restore(sess, restore_path)
-            pdd = PredictDataDeal(vocab=vocab, seq_len=args.seq_len, poss_vocab=poss_vocab)
-
-
-            work_sheet=xlrd.open_workbook(path)
-            sheet=work_sheet.sheet_by_index(1)
-            stand_list = ["自动续费_撤销_None","自动续费_None_None","自动续费_退款_None","自动续费_开通_None","自动续费_查询_None"]
-            for i in range(1,sheet.nrows):
-                sent=sheet.cell_value(i,2)
-                label=sheet.cell_value(i,3)
-                entity=entity_detect(sent)
-                flag=True
-                t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len=pdd.predict(sent)
-                result=model.predict(sess,t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len)
-                # result=ic.predict(t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len)
-                ss=[]
-                pp_ss=[]
-                for i, res in enumerate(result):
-                    id2label = id2label_list[i]
-                    # print(res[0][0])
-                    # print(id2label[res[1][0]])
-                    if i==1:
-                        if sent in dd_2:
-                            ss.append(str(dd_2[sent][1])+'_'+dd_2[sent][0])
-                            pp_ss.append(dd_2[sent][0])
-                        else:
-                            if res[0][0] <= 0.5:
-                                ss.append("0.0" + '_' + 'None')
-                                pp_ss.append('None')
-                            else:
-                                ss.append(str(res[0][0]) + '_' + id2label[res[1][0]])
-                                pp_ss.append(id2label[res[1][0]])
-                    if i==2:
-                        if sent in dd_3:
-                            ss.append(str(dd_3[sent][1]) + '_' + dd_3[sent][0])
-                            pp_ss.append(dd_3[sent][0])
-                        else:
-                            if res[0][0] <= 0.5:
-                                ss.append("0.0" + '_' + 'None')
-                                pp_ss.append('None')
-                            else:
-                                ss.append(str(res[0][0]) + '_' + id2label[res[1][0]])
-                                pp_ss.append(id2label[res[1][0]])
-                    if i==0:
-                        if res[0][0]<=0.7:
-                            ss.append("0.0"+'_'+'None')
-                            pp_ss.append('None')
-                        else:
-                            ss.append(str(res[0][0])+'_'+id2label[res[1][0]])
-                            pp_ss.append(id2label[res[1][0]])
-
-                # print(sent,'\t\t',label,'\t\t',ss)
-                pp_str='_'.join(pp_ss)
-
-                if pp_str in stand_list:
-                    fw.write("True"+'\t\t'+sent + '\t\t' + str(label) + '\n')
-                else:
-                    fw.write("False"+'\t\t'+sent + '\t\t' + str(label) + '\n')
-                    fw_false.write("False"+'\t\t'+sent + '\t\t' + str(label) + '\n')
-                    fw_false.write(" ".join(ss) + '\n')
-                    fw_false.write('\n')
-
-                fw.write(" ".join(ss) + '\n')
-                fw.write('\n')
-
-                if int(label)==3:
-                    if pp_str in stand_list:
-                        count_dict['3_correct']=count_dict.get('3_correct',0)+1
-                    else:
-                        count_dict['3_error']=count_dict.get('3_error',0)+1
-
-                if int(label)==1:
-                    if pp_str in stand_list:
-                        count_dict['1_correct']=count_dict.get('1_correct',0)+1
-                    else:
-                        count_dict['1_error']=count_dict.get('1_error',0)+1
-
-                if int(label)==2:
-                    if pp_str in stand_list:
-                        count_dict['2_correct']=count_dict.get('2_correct',0)+1
-                    else:
-                        count_dict['2_error']=count_dict.get('2_error',0)+1
-
-                if int(label)==5:
-                    if pp_str in stand_list:
-                        count_dict['5_correct']=count_dict.get('5_correct',0)+1
-                    else:
-                        count_dict['5_error']=count_dict.get('5_error',0)+1
-
-                print(count_dict)
-
-
-
-    if do_predict_other:
-        config = tf.ConfigProto(allow_soft_placement=True)
-        path='/dockerdata/KeyWordDataSet/rg_train_20190701_1000002.train_ner'
-        fw=open('result_analy.txt','w',encoding='utf-8')
-        id2label1 = {v: k for k, v in label_vocab1.items()}
-        id2label2 = {v: k for k, v in label_vocab2.items()}
-        id2label3 = {v: k for k, v in label_vocab3.items()}
-        id2label_list=[id2label1,id2label2,id2label3]
-        pre_label_list=[]
-        with tf.Session(config=config) as sess:
-            sess = model.restore(sess,restore_path)
-            pdd = PredictDataDeal(vocab=vocab, seq_len=args.seq_len, poss_vocab=poss_vocab)
-
-            for line in open(path,'r',encoding='utf-8').readlines():
-                lines=line.replace('\n','').split(":")
-                sent,intent=lines[-3],lines[-4]
-                if intent in intent_dict:
-                    continue
-                t1, t1_len, poss = pdd.predict(sent)
-                result = model.predict(sess, t1, t1_len, poss)
-                ss=[]
-                for i, res in enumerate(result):
-                    id2label = id2label_list[i]
-                    ss.append(str(id2label[res[1][0]])+'_'+str(res[0][0]))
-                pre_label_list.append(ss)
-
-                print('%s %s %s'%(intent,sent,ss))
-                fw.write(intent+'\t\t'+sent+'\t\t'+str(ss)+'\n')
-
+    elif argsConfig.mode == 'predict':
+        restore_path = PATH + "/output/%s_%s_2kw.ckpt" % (model_name, args.task_name)
+        predict(args,model_name,restore_path)
 
 
 
@@ -553,4 +310,4 @@ if __name__ == '__main__':
                         help="config_path", type=str, default=PATH + '/Configs/BaseLstm.config')  # vocab_8kw
     argsConfig = parser.parse_args()
 
-    train(argsConfig)
+    main(argsConfig)

@@ -229,29 +229,16 @@ class ModelTemplate(object):
             coord.join(threads)
             print('#'*20,end_time-start_time)
 
-    def predict(self,sess,t1,t1_len,poss,t1_re,t1_re_len,t1_char,t1_char_len,t1_rm_char,t1_rm_char_len):
-        start_time=time.time()
+    def predict(self,sess,t1,t1_len,poss):
         feed_dict = {
             self.sent_token: t1,
             self.sent_len: t1_len,
             self.sent_poss:poss,
-            self.sent_word_re:t1_re,
-            self.sent_len_re:t1_re_len,
-            self.sent_char:t1_char,
-            self.sent_len_char:t1_char_len,
-            self.sent_word_re_char:t1_rm_char,
-            self.sent_len_re_char:t1_rm_char_len,
             self.dropout: 0.0
         }
-        # print(sent1_word_)
-
-        pre1,pre2,pre3 = sess.run([self.pred_probs_list[0],self.pred_probs_list[1],self.pred_probs_list[2]], feed_dict=feed_dict)
-        res=[]
-        for ele in [pre1,pre2,pre3]:
-            score=np.max(ele,1)
-            pre_leb=np.argmax(ele,1)
-            res.append([score,pre_leb])
-        return res
+        pred_prob = sess.run(self.pred_probs, feed_dict=feed_dict)
+        pred_lab=np.argmax(pred_prob,-1)
+        return pred_prob,pred_lab
 
     def restore(self,sess,restore_model):
         saver=tf.train.Saver()
@@ -260,6 +247,7 @@ class ModelTemplate(object):
         return sess
 
     def save(self,saver,sess,save_model,epoch):
-        saver.save(sess,save_model,global_step=epoch)
+        # saver.save(sess,save_model,global_step=epoch)
+        saver.save(sess,save_model)
         _logger.info('save in :%s'%(save_model))
 
