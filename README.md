@@ -6,4 +6,4 @@ python train.py --mode=train
 
 需要在
 预测命令
-python predict.txt --mode=predict
+python train.txt --mode=predict
